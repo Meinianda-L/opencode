@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotification } from "@agentclientprotocol/sdk"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Currency } from "@opencode-ai/core/currency"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { UsageService } from "@/acp/usage"
@@ -98,7 +99,7 @@ const providers = (context = 128_000, currency?: string): Record<ProviderV2.ID, 
 const fakeLayer = (input: {
   readonly messages?: Effect.Effect<readonly UsageService.SessionMessage[], unknown>
   readonly providers?: (directory: string) => Effect.Effect<Record<ProviderV2.ID, Provider.Info>, unknown>
-  readonly display?: (directory: string) => Effect.Effect<Parameters<typeof UsageService.displayCost>[2], unknown>
+  readonly display?: (directory: string) => Effect.Effect<Currency.Display | undefined, unknown>
 }) =>
   LayerNode.compile(UsageService.node, [
     [
@@ -185,31 +186,6 @@ describe("acp usage", () => {
 
   test("calculates total session cost from assistant messages", () => {
     expect(UsageService.totalSessionCost([assistant({ cost: 1.25 }), user(), assistant({ cost: 2.5 })])).toBe(3.75)
-  })
-
-  test("displayCost keeps the source currency when no display currency is configured", () => {
-    expect(UsageService.displayCost(1.5, "EUR", undefined)).toEqual({ amount: 1.5, currency: "EUR" })
-    expect(UsageService.displayCost(1.5, "EUR", {})).toEqual({ amount: 1.5, currency: "EUR" })
-  })
-
-  test("displayCost converts to the configured display currency", () => {
-    const result = UsageService.displayCost(1.5, "USD", { currency: "CNY" })
-    expect(result.currency).toBe("CNY")
-    expect(result.amount).toBeCloseTo(1.5 * 7.15, 10)
-  })
-
-  test("displayCost prefers user-provided rates", () => {
-    const result = UsageService.displayCost(1.5, "USD", { currency: "CNY", exchangeRates: { CNY: 7.2 } })
-    expect(result).toEqual({ amount: 10.8, currency: "CNY" })
-  })
-
-  test("displayCost never relabels when conversion is impossible", () => {
-    expect(UsageService.displayCost(1.5, "USD", { currency: "XYZ" })).toEqual({ amount: 1.5, currency: "USD" })
-    expect(UsageService.displayCost(1.5, "XYZ", { currency: "CNY" })).toEqual({ amount: 1.5, currency: "XYZ" })
-    expect(UsageService.displayCost(1.5, "USD", { currency: "CNY", exchangeRates: { CNY: 0 } })).toEqual({
-      amount: 1.5,
-      currency: "USD",
-    })
   })
 
   it.effect("loads context limits from providers and caches by directory/provider/model", () => {

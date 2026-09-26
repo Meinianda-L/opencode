@@ -43,6 +43,7 @@ import { UsageService } from "./usage"
 import { ACPProfile } from "./profile"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Currency } from "@opencode-ai/core/currency"
 import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
 
@@ -615,62 +616,41 @@ function makeDirectoryService(sdk: OpencodeClient) {
 }
 
 function makeUsageService(sdk: OpencodeClient) {
-  const limits = new Map<string, Promise<number | undefined>>()
-  const currencies = new Map<string, Promise<string>>()
-  const displays = new Map<string, Promise<Parameters<typeof UsageService.displayCost>[2]>>()
-  const contextLimit: UsageService.Interface["contextLimit"] = Effect.fn("ACP.promptUsage.contextLimit")(
-    function* (params) {
-      const key = `${params.directory}\u0000${params.providerID}\u0000${params.modelID}`
-      const current = limits.get(key)
-      if (current) return yield* Effect.promise(() => current)
-
-      const next = sdk.config
-        .providers({ directory: params.directory }, { throwOnError: true })
-        .then((response) => {
-          const providers = Object.fromEntries(
-            (response.data?.providers ?? []).map((provider) => [provider.id, provider]),
-          ) as Record<ProviderV2.ID, Provider.Info>
-          return UsageService.findContextLimit(providers, params.providerID, params.modelID)
-        })
-        .catch(() => undefined)
-      limits.set(key, next)
-      return yield* Effect.promise(() => next)
-    },
-  )
-
-  const modelCurrency = Effect.fn("ACP.promptUsage.modelCurrency")(function* (params: {
-    readonly directory: string
-    readonly providerID: ProviderV2.ID
-    readonly modelID: ModelV2.ID
-  }) {
+  const models = new Map<string, Promise<Provider.Model | undefined>>()
+  const displays = new Map<string, Promise<Currency.Display | undefined>>()
+  const model = (params: { readonly directory: string; readonly providerID: string; readonly modelID: string }) => {
     const key = `${params.directory}\u0000${params.providerID}\u0000${params.modelID}`
-    const current = currencies.get(key)
-    if (current) return yield* Effect.promise(() => current)
+    const current = models.get(key)
+    if (current) return Effect.promise(() => current)
 
     const next = sdk.config
       .providers({ directory: params.directory }, { throwOnError: true })
-      .then((response) => {
-        const providers = Object.fromEntries(
-          (response.data?.providers ?? []).map((provider) => [provider.id, provider]),
-        ) as Record<ProviderV2.ID, Provider.Info>
-        return UsageService.findCurrency(providers, params.providerID, params.modelID)
-      })
-      .catch(() => "USD")
-    currencies.set(key, next)
-    return yield* Effect.promise(() => next)
-  })
-
-  const displayConfig = Effect.fn("ACP.promptUsage.displayConfig")(function* (params: { readonly directory: string }) {
-    const current = displays.get(params.directory)
-    if (current) return yield* Effect.promise(() => current)
+      .then(
+        (response) =>
+          (response.data?.providers ?? []).find((provider) => provider.id === params.providerID)?.models[
+            params.modelID
+          ] as Provider.Model | undefined,
+      )
+      .catch(() => undefined)
+    models.set(key, next)
+    return Effect.promise(() => next)
+  }
+  const display = (directory: string) => {
+    const current = displays.get(directory)
+    if (current) return Effect.promise(() => current)
 
     const next = sdk.config
-      .get({ directory: params.directory }, { throwOnError: true })
+      .get({ directory }, { throwOnError: true })
       .then((response) => response.data?.display)
       .catch(() => undefined)
-    displays.set(params.directory, next)
-    return yield* Effect.promise(() => next)
-  })
+    displays.set(directory, next)
+    return Effect.promise(() => next)
+  }
+  const contextLimit: UsageService.Interface["contextLimit"] = Effect.fn("ACP.promptUsage.contextLimit")(
+    function* (params) {
+      return (yield* model(params))?.limit.context
+    },
+  )
 
   const sendUpdate: UsageService.Interface["sendUpdate"] = Effect.fn("ACP.promptUsage.sendUpdate")(function* (params) {
     const messages = yield* request(
@@ -694,21 +674,19 @@ function makeUsageService(sdk: OpencodeClient) {
     const message = UsageService.latestAssistantMessage(messages)
     if (!message?.providerID || !message.modelID) return
 
-    const size = yield* contextLimit({
+    const info = yield* model({
       directory: params.directory,
-      providerID: ProviderV2.ID.make(message.providerID),
-      modelID: ModelV2.ID.make(message.modelID),
+      providerID: message.providerID,
+      modelID: message.modelID,
     })
+    const size = info?.limit.context
     if (!size) return
 
-    const currency = yield* modelCurrency({
-      directory: params.directory,
-      providerID: ProviderV2.ID.make(message.providerID),
-      modelID: ModelV2.ID.make(message.modelID),
-    })
-
-    const display = yield* displayConfig({ directory: params.directory })
-    const cost = UsageService.displayCost(UsageService.totalSessionCost(messages), currency, display)
+    const cost = Currency.display(
+      UsageService.totalSessionCost(messages),
+      info.cost.currency ?? "USD",
+      yield* display(params.directory),
+    )
 
     yield* Effect.promise(() =>
       params.connection

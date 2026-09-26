@@ -69,4 +69,29 @@ describe("currency", () => {
   test("format falls back to a plain label for codes Intl rejects", () => {
     expect(Currency.format(1.234, "X")).toBe("1.23 X")
   })
+
+  test("display keeps the source currency when no display currency is configured", () => {
+    expect(Currency.display(1.5, "EUR")).toEqual({ amount: 1.5, currency: "EUR" })
+    expect(Currency.display(1.5, "EUR", {})).toEqual({ amount: 1.5, currency: "EUR" })
+    expect(Currency.display(1.5, "EUR", { currency: "  " })).toEqual({ amount: 1.5, currency: "EUR" })
+  })
+
+  test("display converts to the configured display currency", () => {
+    const result = Currency.display(1.5, "USD", { currency: "cny" })
+    expect(result.currency).toBe("CNY")
+    expect(result.amount).toBeCloseTo(1.5 * 7.15, 10)
+  })
+
+  test("display never relabels when conversion is impossible", () => {
+    expect(Currency.display(1.5, "USD", { currency: "XYZ" })).toEqual({ amount: 1.5, currency: "USD" })
+    expect(Currency.display(1.5, "XYZ", { currency: "CNY" })).toEqual({ amount: 1.5, currency: "XYZ" })
+    expect(Currency.display(1.5, "USD", { currency: "CNY", exchangeRates: { CNY: 0 } })).toEqual({
+      amount: 1.5,
+      currency: "USD",
+    })
+  })
+
+  test("formatDisplay formats the converted amount", () => {
+    expect(Currency.formatDisplay(1.5, "USD", { currency: "CNY", exchangeRates: { CNY: 7.2 } })).toContain("10.8")
+  })
 })

@@ -5,7 +5,7 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
-import { formatCost, sourceCurrency } from "../../util/cost-display"
+import { Currency } from "@opencode-ai/core/currency"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 
@@ -46,7 +46,8 @@ export function SubagentFooter() {
 
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? formatCost(cost, sourceCurrency(model), sync.data.config.display) : undefined,
+      cost:
+        cost > 0 ? Currency.formatDisplay(cost, model?.cost?.currency ?? "USD", sync.data.config.display) : undefined,
     }
   })
 

@@ -24,7 +24,7 @@ import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
 import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
-import { formatCost, sourceCurrency } from "../../util/cost-display"
+import { Currency } from "@opencode-ai/core/currency"
 import { useEvent } from "../../context/event"
 import { editorSelectionKey, useEditorContext, type EditorSelection } from "../../context/editor"
 import { normalizePromptContent, openEditor } from "../../editor"
@@ -273,7 +273,8 @@ export function Prompt(props: PromptProps) {
     const cost = session?.cost ?? 0
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? formatCost(cost, sourceCurrency(model), sync.data.config.display) : undefined,
+      cost:
+        cost > 0 ? Currency.formatDisplay(cost, model?.cost?.currency ?? "USD", sync.data.config.display) : undefined,
     }
   })
 
